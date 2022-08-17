@@ -45,10 +45,10 @@ def clues_list(page: int = 0):
                 clues.value, 
                 clues.invalid_count,
                 clues.canon,
-                categories.id AS categories_id,
+                clues.category_id AS category,
+                categories.id AS id,
                 categories.title, 
-                categories.canon AS categories_canon, 
-                clues.category_id AS category
+                categories.canon AS canon
                 FROM categories
                 JOIN clues
                     ON (categories.id = clues.category_id)
@@ -64,14 +64,12 @@ def clues_list(page: int = 0):
                 grouping = False
                 category_object = {}
                 for i, column in enumerate(cur.description):
-                    if column.name == "categories_id":
-                        grouping = True
-                    if column.name == "category":
-                        grouping = False
                     if grouping == False:
                         record[column.name] = row[i]
                     else:
                         category_object[column.name] = row[i]
+                    if column.name == "category":
+                        grouping = True
                 record["category"] = category_object
                 results.append(record)
 
@@ -102,10 +100,10 @@ def get_clue(clue_id: int, response: Response):
                 clues.value, 
                 clues.invalid_count,
                 clues.canon,
-                categories.id AS categories_id,
+                clues.category_id AS category,
+                categories.id AS id,
                 categories.title, 
-                categories.canon AS categories_canon, 
-                clues.category_id AS category
+                categories.canon AS canon
                 FROM categories
                 JOIN clues
                     ON (categories.id = clues.category_id)
@@ -121,14 +119,12 @@ def get_clue(clue_id: int, response: Response):
             grouping = False
             category_object = {}
             for i, column in enumerate(cur.description):
-                if column.name == "categories_id":
-                    grouping = True
-                if column.name == "category":
-                    grouping = False
                 if grouping == False:
                     record[column.name] = row[i]
                 else:
                     category_object[column.name] = row[i]
+                if column.name == "category":
+                    grouping = True
             record["category"] = category_object
             return record
 
@@ -143,8 +139,19 @@ def get_random_clue(response: Response, valid: bool = True):
             if valid == True:
                 cur.execute(
                     f"""
-                    SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
-                    FROM clues
+                    SELECT clues.id, 
+                    clues.answer, 
+                    clues.question, 
+                    clues.value, 
+                    clues.invalid_count,
+                    clues.canon,
+                    clues.category_id AS category,
+                    categories.id AS id,
+                    categories.title, 
+                    categories.canon AS canon
+                    FROM categories
+                    JOIN clues
+                        ON (categories.id = clues.category_id)
                     WHERE clues.invalid_count = 0
                     ORDER BY RANDOM() LIMIT 1;
                 """,
@@ -153,8 +160,19 @@ def get_random_clue(response: Response, valid: bool = True):
             else:
                 cur.execute(
                     f"""
-                    SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
-                    FROM clues
+                    SELECT clues.id, 
+                    clues.answer, 
+                    clues.question, 
+                    clues.value, 
+                    clues.invalid_count,
+                    clues.canon,
+                    clues.category_id AS category,
+                    categories.id AS id,
+                    categories.title, 
+                    categories.canon AS canon
+                    FROM categories
+                    JOIN clues
+                        ON (categories.id = clues.category_id)
                     ORDER BY RANDOM() LIMIT 1;
                 """,
                     [],
@@ -164,8 +182,16 @@ def get_random_clue(response: Response, valid: bool = True):
                 response.status_code = status.HTTP_404_NOT_FOUND
                 return {"message": "Clue not found"}
             record = {}
+            grouping = False
+            category_object = {}
             for i, column in enumerate(cur.description):
-                record[column.name] = row[i]
+                if grouping == False:
+                    record[column.name] = row[i]
+                else:
+                    category_object[column.name] = row[i]
+                if column.name == "category":
+                    grouping = True
+            record["category"] = category_object
             return record
 # @router.post(
 #     "/api/clues",

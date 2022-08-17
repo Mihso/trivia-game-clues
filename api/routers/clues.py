@@ -90,7 +90,31 @@ def get_clue(clue_id: int, response: Response):
                 record[column.name] = row[i]
             return record
 
-
+@router.get(
+    "/api/random-clue",
+    response_model=ClueOut,
+    responses={404: {"model": Message}},
+)
+def get_random_clue(response: Response, valid: bool = True):
+    with psycopg.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
+                FROM clues
+                WHERE clues.invalid_count = 0
+                ORDER BY RANDOM() LIMIT 1;
+            """,
+                [],
+            )
+            row = cur.fetchone()
+            if row is None:
+                response.status_code = status.HTTP_404_NOT_FOUND
+                return {"message": "Clue not found"}
+            record = {}
+            for i, column in enumerate(cur.description):
+                record[column.name] = row[i]
+            return record
 # @router.post(
 #     "/api/clues",
 #     response_model=ClueOut,

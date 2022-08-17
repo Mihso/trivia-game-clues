@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
+# from categories import CategoryOut
 import psycopg
 
 # Using routers for organization
@@ -17,9 +18,8 @@ class ClueOut(BaseModel):
     question: str
     value: int
     invalid_count: int
-    category_id: int
+    category: object
     canon: bool
-
 
 class Clues(BaseModel):
     page_count: int
@@ -39,8 +39,19 @@ def clues_list(page: int = 0):
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
-                FROM clues
+                SELECT clues.id, 
+                clues.answer, 
+                clues.question, 
+                clues.value, 
+                clues.invalid_count,
+                clues.canon,
+                categories.id AS categories_id,
+                categories.title, 
+                categories.canon AS categories_canon, 
+                clues.category_id AS category
+                FROM categories
+                JOIN clues
+                    ON (categories.id = clues.category_id)
                 WHERE clues.invalid_count = 0
                 LIMIT 100 OFFSET %s
             """,
@@ -50,8 +61,18 @@ def clues_list(page: int = 0):
             results = []
             for row in cur.fetchall():
                 record = {}
+                grouping = False
+                category_object = {}
                 for i, column in enumerate(cur.description):
-                    record[column.name] = row[i]
+                    if column.name == "categories_id":
+                        grouping = True
+                    if column.name == "category":
+                        grouping = False
+                    if grouping == False:
+                        record[column.name] = row[i]
+                    else:
+                        category_object[column.name] = row[i]
+                record["category"] = category_object
                 results.append(record)
 
             cur.execute(
@@ -75,8 +96,19 @@ def get_clue(clue_id: int, response: Response):
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
-                FROM clues
+                SELECT clues.id, 
+                clues.answer, 
+                clues.question, 
+                clues.value, 
+                clues.invalid_count,
+                clues.canon,
+                categories.id AS categories_id,
+                categories.title, 
+                categories.canon AS categories_canon, 
+                clues.category_id AS category
+                FROM categories
+                JOIN clues
+                    ON (categories.id = clues.category_id)
                 WHERE clues.id = %s AND clues.invalid_count = 0;
             """,
                 [clue_id],
@@ -86,8 +118,18 @@ def get_clue(clue_id: int, response: Response):
                 response.status_code = status.HTTP_404_NOT_FOUND
                 return {"message": "Clue not found"}
             record = {}
+            grouping = False
+            category_object = {}
             for i, column in enumerate(cur.description):
-                record[column.name] = row[i]
+                if column.name == "categories_id":
+                    grouping = True
+                if column.name == "category":
+                    grouping = False
+                if grouping == False:
+                    record[column.name] = row[i]
+                else:
+                    category_object[column.name] = row[i]
+            record["category"] = category_object
             return record
 
 @router.get(
@@ -98,15 +140,25 @@ def get_clue(clue_id: int, response: Response):
 def get_random_clue(response: Response, valid: bool = True):
     with psycopg.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
-                FROM clues
-                WHERE clues.invalid_count = 0
-                ORDER BY RANDOM() LIMIT 1;
-            """,
-                [],
-            )
+            if valid == True:
+                cur.execute(
+                    f"""
+                    SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
+                    FROM clues
+                    WHERE clues.invalid_count = 0
+                    ORDER BY RANDOM() LIMIT 1;
+                """,
+                    [],
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT clues.id, clues.answer, clues.question, clues.value, clues.invalid_count, clues.category_id, clues.canon
+                    FROM clues
+                    ORDER BY RANDOM() LIMIT 1;
+                """,
+                    [],
+                )
             row = cur.fetchone()
             if row is None:
                 response.status_code = status.HTTP_404_NOT_FOUND

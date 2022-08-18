@@ -17,14 +17,19 @@ class CategoryOut(BaseModel):
     canon: bool
 
 
+class  CategoryWithClueCount(BaseModel):
+    id: int
+    title: str
+    canon: bool
+    num_clues: int
+
 class Categories(BaseModel):
     page_count: int
-    categories: list[CategoryOut]
+    categories: list[CategoryWithClueCount]
 
 
 class Message(BaseModel):
     message: str
-
 
 @router.get("/api/categories", response_model=Categories)
 def categories_list(page: int = 0):
@@ -35,8 +40,12 @@ def categories_list(page: int = 0):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, title, canon
-                FROM categories
+                SELECT C.id, C.title, C.canon,
+                    COUNT(clues.*) AS num_clues
+                FROM categories AS C
+                LEFT OUTER JOIN clues 
+                    on(C.id = clues.category_id)
+                GROUP BY C.id
                 ORDER BY title
                 LIMIT 100 OFFSET %s
             """,

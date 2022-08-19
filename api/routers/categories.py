@@ -1,6 +1,6 @@
-from curses.ascii import isdigit
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
+from typing import Union
 import psycopg
 import os
 import bson
@@ -67,10 +67,10 @@ def categories_list(page: int = 0):
     response_model=CategoryOut,
     responses={404: {"model": Message}},
 )
-def get_category(category_id: str, response: Response):
+def get_category(category_id: Union[int, str]):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if category_id.isdigit():
+    if isinstance(category_id,int):
         true_id = int(category_id)
     else:
         true_id = category_id
@@ -85,7 +85,7 @@ def get_category(category_id: str, response: Response):
     response_model=CategoryOut,
     responses={409: {"model": Message}},
 )
-def create_category(category: CategoryIn, response: Response):
+def create_category(category: CategoryIn):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
     cat = db.categories.insert_one({'title': category.title, "canon": False})
@@ -125,11 +125,15 @@ def create_category(category: CategoryIn, response: Response):
     response_model=CategoryOut,
     responses={404: {"model": Message}},
 )
-def update_category(category_id: str, category: CategoryIn, response: Response):
+def update_category(category_id: Union[int,str], category: CategoryIn, response: Response):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    db.categories.update_one({"_id": category_id},{ '$set': {'title': category.title},})
-    return_cat = db.categories.find_one({'_id': category_id})
+    if isinstance(category_id, int):
+        true_id = int(category_id)
+    else:
+        true_id = category_id
+    db.categories.update_one({"_id":true_id},{ '$set': {'title': category.title},})
+    return_cat = db.categories.find_one({'_id': true_id})
     return_cat['id'] = return_cat['_id']
     del return_cat["_id"]
     return return_cat
@@ -152,22 +156,33 @@ def update_category(category_id: str, category: CategoryIn, response: Response):
     response_model=Message,
     responses={400: {"model": Message}},
 )
-def remove_category(category_id: int, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    """
-                    DELETE FROM categories
-                    WHERE id = %s;
-                """,
-                    [category_id],
-                )
-                return {
-                    "message": "Success",
-                }
-            except psycopg.errors.ForeignKeyViolation:
-                response.status_code = status.HTTP_400_BAD_REQUEST
-                return {
-                    "message": "Cannot delete category because it has clues",
-                }
+def remove_category(category_id: Union[int,str]):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    if isinstance(category_id, int):
+        true_id = int(category_id)
+    else:
+        true_id = category_id
+    return_cat = db.categories.find_one({'_id': true_id})
+    return_cat['id'] = return_cat['_id']
+    del return_cat["_id"]
+    db.categories.delete_one({"_id":true_id})
+    return return_cat
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         try:
+    #             cur.execute(
+    #                 """
+    #                 DELETE FROM categories
+    #                 WHERE id = %s;
+    #             """,
+    #                 [category_id],
+    #             )
+    #             return {
+    #                 "message": "Success",
+    #             }
+    #         except psycopg.errors.ForeignKeyViolation:
+    #             response.status_code = status.HTTP_400_BAD_REQUEST
+    #             return {
+    #                 "message": "Cannot delete category because it has clues",
+    #             }

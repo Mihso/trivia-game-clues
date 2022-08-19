@@ -44,7 +44,7 @@ class Message(BaseModel):
 def clues_list(page: int = 0):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    clues = db.clues.find().sort("_id").skip(100*page).limit(100)
+    clues = db.clues.find({'invalid_count': {"$eq":0}}).sort("_id").skip(100*page).limit(100)
     clues = list(clues)
     for clue in clues:
         category = db.categories.find_one({"_id": clue["category_id"]})
@@ -115,110 +115,140 @@ def clues_list(page: int = 0):
     response_model=ClueOut,
     responses={404: {"model": Message}},
 )
-def get_clue(clue_id: int, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT clues.id, 
-                clues.answer, 
-                clues.question, 
-                clues.value, 
-                clues.invalid_count,
-                clues.canon,
-                clues.category_id AS category,
-                categories.id AS id,
-                categories.title, 
-                categories.canon AS canon
-                FROM categories
-                JOIN clues
-                    ON (categories.id = clues.category_id)
-                WHERE clues.id = %s AND clues.invalid_count = 0;
-            """,
-                [clue_id],
-            )
-            row = cur.fetchone()
-            if row is None:
-                response.status_code = status.HTTP_404_NOT_FOUND
-                return {"message": "Clue not found"}
-            record = {}
-            grouping = False
-            category_object = {}
-            for i, column in enumerate(cur.description):
-                if grouping == False:
-                    record[column.name] = row[i]
-                else:
-                    category_object[column.name] = row[i]
-                if column.name == "category":
-                    grouping = True
-            record["category"] = category_object
-            return record
+def get_clue(clue_id: Union[int, str]):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    if isinstance(clue_id,int):
+        true_id = int(clue_id)
+    else:
+        true_id = clue_id
+    result = db.clues.find_one({"$and": [{"_id": true_id}, {'invalid_count': {"$eq": 0}}]})
+    result["id"] = str(result["_id"])
+    del result["_id"]
+    category = db.categories.find_one({"_id": result["category_id"]})
+    db.categories.find()
+    result["category"] = category
+    del result["category_id"]
+    return result
+
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         cur.execute(
+    #             f"""
+    #             SELECT clues.id, 
+    #             clues.answer, 
+    #             clues.question, 
+    #             clues.value, 
+    #             clues.invalid_count,
+    #             clues.canon,
+    #             clues.category_id AS category,
+    #             categories.id AS id,
+    #             categories.title, 
+    #             categories.canon AS canon
+    #             FROM categories
+    #             JOIN clues
+    #                 ON (categories.id = clues.category_id)
+    #             WHERE clues.id = %s AND clues.invalid_count = 0;
+    #         """,
+    #             [clue_id],
+    #         )
+    #         row = cur.fetchone()
+    #         if row is None:
+    #             response.status_code = status.HTTP_404_NOT_FOUND
+    #             return {"message": "Clue not found"}
+    #         record = {}
+    #         grouping = False
+    #         category_object = {}
+    #         for i, column in enumerate(cur.description):
+    #             if grouping == False:
+    #                 record[column.name] = row[i]
+    #             else:
+    #                 category_object[column.name] = row[i]
+    #             if column.name == "category":
+    #                 grouping = True
+    #         record["category"] = category_object
+    #         return record
 
 @router.get(
     "/api/random-clue",
     response_model=ClueOut,
     responses={404: {"model": Message}},
 )
-def get_random_clue(response: Response, valid: bool = True):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            if valid == True:
-                cur.execute(
-                    f"""
-                    SELECT clues.id, 
-                    clues.answer, 
-                    clues.question, 
-                    clues.value, 
-                    clues.invalid_count,
-                    clues.canon,
-                    clues.category_id AS category,
-                    categories.id AS id,
-                    categories.title, 
-                    categories.canon AS canon
-                    FROM categories
-                    JOIN clues
-                        ON (categories.id = clues.category_id)
-                    WHERE clues.invalid_count = 0
-                    ORDER BY RANDOM() LIMIT 1;
-                """,
-                    [],
-                )
-            else:
-                cur.execute(
-                    f"""
-                    SELECT clues.id, 
-                    clues.answer, 
-                    clues.question, 
-                    clues.value, 
-                    clues.invalid_count,
-                    clues.canon,
-                    clues.category_id AS category,
-                    categories.id AS id,
-                    categories.title, 
-                    categories.canon AS canon
-                    FROM categories
-                    JOIN clues
-                        ON (categories.id = clues.category_id)
-                    ORDER BY RANDOM() LIMIT 1;
-                """,
-                    [],
-                )
-            row = cur.fetchone()
-            if row is None:
-                response.status_code = status.HTTP_404_NOT_FOUND
-                return {"message": "Clue not found"}
-            record = {}
-            grouping = False
-            category_object = {}
-            for i, column in enumerate(cur.description):
-                if grouping == False:
-                    record[column.name] = row[i]
-                else:
-                    category_object[column.name] = row[i]
-                if column.name == "category":
-                    grouping = True
-            record["category"] = category_object
-            return record
+def get_random_clue(valid: bool = True):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    if valid == True:
+        result = list(db.clues.aggregate([{"$match": {"invalid_count": {"$eq": 0}}},{"$sample": {"size": 1}}]))[0]
+    else:
+        result = list(db.clues.aggregate([{"$sample": {"size": 1}}]))[0]
+        
+    result["id"] = str(result["_id"])
+    del result["_id"]
+    category = db.categories.find_one({"_id": result["category_id"]})
+    db.categories.find()
+    result["category"] = category
+    del result["category_id"]
+    return result
+
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         if valid == True:
+    #             cur.execute(
+    #                 f"""
+    #                 SELECT clues.id, 
+    #                 clues.answer, 
+    #                 clues.question, 
+    #                 clues.value, 
+    #                 clues.invalid_count,
+    #                 clues.canon,
+    #                 clues.category_id AS category,
+    #                 categories.id AS id,
+    #                 categories.title, 
+    #                 categories.canon AS canon
+    #                 FROM categories
+    #                 JOIN clues
+    #                     ON (categories.id = clues.category_id)
+    #                 WHERE clues.invalid_count = 0
+    #                 ORDER BY RANDOM() LIMIT 1;
+    #             """,
+    #                 [],
+    #             )
+    #         else:
+    #             cur.execute(
+    #                 f"""
+    #                 SELECT clues.id, 
+    #                 clues.answer, 
+    #                 clues.question, 
+    #                 clues.value, 
+    #                 clues.invalid_count,
+    #                 clues.canon,
+    #                 clues.category_id AS category,
+    #                 categories.id AS id,
+    #                 categories.title, 
+    #                 categories.canon AS canon
+    #                 FROM categories
+    #                 JOIN clues
+    #                     ON (categories.id = clues.category_id)
+    #                 ORDER BY RANDOM() LIMIT 1;
+    #             """,
+    #                 [],
+    #             )
+    #         row = cur.fetchone()
+    #         if row is None:
+    #             response.status_code = status.HTTP_404_NOT_FOUND
+    #             return {"message": "Clue not found"}
+    #         record = {}
+    #         grouping = False
+    #         category_object = {}
+    #         for i, column in enumerate(cur.description):
+    #             if grouping == False:
+    #                 record[column.name] = row[i]
+    #             else:
+    #                 category_object[column.name] = row[i]
+    #             if column.name == "category":
+    #                 grouping = True
+    #         record["category"] = category_object
+    #         return record
 # @router.post(
 #     "/api/clues",
 #     response_model=ClueOut,
@@ -276,22 +306,33 @@ def get_random_clue(response: Response, valid: bool = True):
     response_model=ClueOut,
     responses={404: {"model": Message}},
 )
-def remove_clue(clue_id: int, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    f"""
-                    UPDATE clues
-                    SET invalid_count = invalid_count + 1
+def remove_clue(clue_id: Union[int, str]):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    if isinstance(clue_id, int):
+        true_id = int(clue_id)
+    else:
+        true_id = clue_id
+    db.clues.update_one({"_id":true_id},{ '$inc': {'invalid_count': 1}})
+    return_cat = db.clues.find_one({'_id': true_id})
+    return_cat['id'] = return_cat['_id']
+    del return_cat["_id"]
+    return return_cat
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         try:
+    #             cur.execute(
+    #                 f"""
+    #                 UPDATE clues
+    #                 SET invalid_count = invalid_count + 1
 
-                    WHERE id = %s;
-                """,
-                    [clue_id],
-                )
-                return get_clue(clue_id, response)
-            except psycopg.errors.ForeignKeyViolation:
-                response.status_code = status.HTTP_404_BAD_REQUEST
-                return {
-                    "message": "Cannot delete clue",
-                }
+    #                 WHERE id = %s;
+    #             """,
+    #                 [clue_id],
+    #             )
+    #             return get_clue(clue_id, response)
+    #         except psycopg.errors.ForeignKeyViolation:
+    #             response.status_code = status.HTTP_404_BAD_REQUEST
+    #             return {
+    #                 "message": "Cannot delete clue",
+    #             }

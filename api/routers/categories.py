@@ -74,7 +74,7 @@ def get_category(category_id: Union[int, str]):
         true_id = int(category_id)
     else:
         true_id = category_id
-    result = db.categories.find_one({"_id": true_id})
+    result = db.categories.aggregates({"_id": true_id})
     result["id"] = result["_id"]
     del result["_id"]
     return result

@@ -19,13 +19,12 @@ class GameOut(BaseModel):
     total_amount_won: int
 
 class CustomGameIn(BaseModel):
-    id: int
     created_on: str
 
 class CustomGameOut(BaseModel):
     id: int
     created_on: str
-    clues: ClueOut
+    clues: list[ClueOut]
 
 class Message(BaseModel):
     message: str
@@ -86,19 +85,39 @@ def create_custom_game(category: CustomGameIn, response: Response):
                 clues.invalid_count, clues.category_id
                 FROM clues
                 WHERE clues.canon = true
-                Limit 30
-
+                Limit 30;
             """,
             )
 
+                clues = []
+                for row in cur.fetchall():
+                    record = {}
+                    for i, column in enumerate(cur.description):
+                        record[column.name] = row[i]
+                    clues.append(record)
                 cur.execute(
+                    f"""
+                    INSERT INTO game_definitions(created_on)
+                    VALUES (CURRENT_TIMESTAMP)
+                    RETURNING game_definitions.id;
                     """
-                    INSERT INTO categories (title, canon)
-                    VALUES (%s, false)
-                    RETURNING id, title, canon;
-                """,
-                    [category.title],
                 )
+                row = cur.fetchone()
+                record = {}
+                for i, column in enumerate(cur.description):
+                    record[column.name] = row[i]
+                def_id = record
+
+                for row in clues:
+                    cur.execute(
+                    f"""
+                    INSERT INTO game_defintion_clues(game_definition_id, clue_id)
+                    VALUES (%s, %s)
+                    """,
+                    [def_id, row["id"]],
+                )
+                
+
             except psycopg.errors.UniqueViolation:
                 # status values at https://github.com/encode/starlette/blob/master/starlette/status.py
                 response.status_code = status.HTTP_409_CONFLICT

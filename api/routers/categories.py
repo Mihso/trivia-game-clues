@@ -1,6 +1,16 @@
+from curses.ascii import isdigit
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 import psycopg
+import os
+import bson
+import pymongo
+
+dbhost = os.environ['MONGOHOST']
+dbname = os.environ['MONGODATABASE']
+dbuser = os.environ['MONGOUSER']
+dbpass = os.environ['MONGOPASSWORD']
+mongo_str = f"mongodb://{dbuser}:{dbpass}@{dbhost}"
 
 # Using routers for organization
 # See https://fastapi.tiangolo.com/tutorial/bigger-applications/
@@ -12,13 +22,13 @@ class CategoryIn(BaseModel):
 
 
 class CategoryOut(BaseModel):
-    id: int
+    id: str
     title: str
     canon: bool
 
 
 class  CategoryWithClueCount(BaseModel):
-    id: int
+    id: str
     title: str
     canon: bool
     num_clues: int
@@ -33,41 +43,23 @@ class Message(BaseModel):
 
 @router.get("/api/categories", response_model=Categories)
 def categories_list(page: int = 0):
-    # Uses the environment variables to connect
-    # In development, see the docker-compose.yml file for
-    #   the PG settings in the "environment" section
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT C.id, C.title, C.canon,
-                    COUNT(clues.*) AS num_clues
-                FROM categories AS C
-                LEFT OUTER JOIN clues 
-                    on(C.id = clues.category_id)
-                GROUP BY C.id
-                ORDER BY title
-                LIMIT 100 OFFSET %s
-            """,
-                [page * 100],
-            )
-
-            results = []
-            for row in cur.fetchall():
-                record = {}
-                for i, column in enumerate(cur.description):
-                    record[column.name] = row[i]
-                results.append(record)
-
-            cur.execute(
-                """
-                SELECT COUNT(*) FROM categories;
-            """
-            )
-            raw_count = cur.fetchone()[0]
-            page_count = (raw_count // 100) + 1
-
-            return Categories(page_count=page_count, categories=results)
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    categories = db.categories.find().sort("title").skip(100*page).limit(100)
+    categories = list(categories)
+    for category in categories:
+        count = db.command({
+            "count": "clues",
+            "query": { "category_id": category["_id"] }
+        })
+        category["num_clues"] = count["n"]
+        category["id"] = str(category["_id"])
+        del category["_id"]
+    page_count = db.command({"count": "categories"})["n"] // 100
+    return {
+        "page_count": page_count,
+        "categories": categories,
+    }
 
 
 @router.get(
@@ -75,25 +67,17 @@ def categories_list(page: int = 0):
     response_model=CategoryOut,
     responses={404: {"model": Message}},
 )
-def get_category(category_id: int, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT id, title, canon
-                FROM categories
-                WHERE id = %s
-            """,
-                [category_id],
-            )
-            row = cur.fetchone()
-            if row is None:
-                response.status_code = status.HTTP_404_NOT_FOUND
-                return {"message": "Category not found"}
-            record = {}
-            for i, column in enumerate(cur.description):
-                record[column.name] = row[i]
-            return record
+def get_category(category_id: str, response: Response):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    if category_id.isdigit():
+        true_id = int(category_id)
+    else:
+        true_id = category_id
+    result = db.categories.find_one({"_id": true_id})
+    result["id"] = result["_id"]
+    del result["_id"]
+    return result
 
 
 @router.post(
@@ -102,31 +86,38 @@ def get_category(category_id: int, response: Response):
     responses={409: {"model": Message}},
 )
 def create_category(category: CategoryIn, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            try:
-                # Uses the RETURNING clause to get the data
-                # just inserted into the database. See
-                # https://www.postgresql.org/docs/current/sql-insert.html
-                cur.execute(
-                    """
-                    INSERT INTO categories (title, canon)
-                    VALUES (%s, false)
-                    RETURNING id, title, canon;
-                """,
-                    [category.title],
-                )
-            except psycopg.errors.UniqueViolation:
-                # status values at https://github.com/encode/starlette/blob/master/starlette/status.py
-                response.status_code = status.HTTP_409_CONFLICT
-                return {
-                    "message": "Could not create duplicate category",
-                }
-            row = cur.fetchone()
-            record = {}
-            for i, column in enumerate(cur.description):
-                record[column.name] = row[i]
-            return record
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    cat = db.categories.insert_one({'title': category.title, "canon": False})
+    return_cat = db.categories.find_one({'_id': cat.inserted_id})
+    return_cat['id'] = str(cat.inserted_id)
+    del return_cat["_id"]
+    return return_cat
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         try:
+    #             # Uses the RETURNING clause to get the data
+    #             # just inserted into the database. See
+    #             # https://www.postgresql.org/docs/current/sql-insert.html
+    #             cur.execute(
+    #                 """
+    #                 INSERT INTO categories (title, canon)
+    #                 VALUES (%s, false)
+    #                 RETURNING id, title, canon;
+    #             """,
+    #                 [category.title],
+    #             )
+    #         except psycopg.errors.UniqueViolation:
+    #             # status values at https://github.com/encode/starlette/blob/master/starlette/status.py
+    #             response.status_code = status.HTTP_409_CONFLICT
+    #             return {
+    #                 "message": "Could not create duplicate category",
+    #             }
+    #         row = cur.fetchone()
+    #         record = {}
+    #         for i, column in enumerate(cur.description):
+    #             record[column.name] = row[i]
+    #         return record
 
 
 @router.put(
@@ -134,17 +125,25 @@ def create_category(category: CategoryIn, response: Response):
     response_model=CategoryOut,
     responses={404: {"model": Message}},
 )
-def update_category(category_id: int, category: CategoryIn, response: Response):
-    with psycopg.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE categories
-                SET title = %s
-                WHERE id = %s;
-            """,
-                [category.title, category_id],
-            )
+def update_category(category_id: str, category: CategoryIn, response: Response):
+    client = pymongo.MongoClient(mongo_str)
+    db = client[dbname]
+    db.categories.update_one({"_id": category_id},{ '$set': {'title': category.title},})
+    return_cat = db.categories.find_one({'_id': category_id})
+    return_cat['id'] = return_cat['_id']
+    del return_cat["_id"]
+    return return_cat
+
+    # with psycopg.connect() as conn:
+    #     with conn.cursor() as cur:
+    #         cur.execute(
+    #             """
+    #             UPDATE categories
+    #             SET title = %s
+    #             WHERE id = %s;
+    #         """,
+    #             [category.title, category_id],
+    #         )
     return get_category(category_id, response)
 
 

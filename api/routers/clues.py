@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 from typing import Union
-import routers
+from routers.categories import CategoryOut
 import os
 import bson
 import pymongo
@@ -28,7 +28,7 @@ class ClueOut(BaseModel):
     question: str
     value: int
     invalid_count: int
-    category: object
+    category: CategoryOut
     canon: bool
 
 class Clues(BaseModel):
@@ -51,6 +51,8 @@ def clues_list(page: int = 0):
         db.categories.find()
         clue["id"] = str(clue["_id"])
         clue["category"] = category
+        category['id'] = str(category['_id'])
+        del category['_id']
         del clue["_id"]
         del clue["category_id"]
     page_count = db.command({"count": "clues"})["n"] // 100
@@ -118,15 +120,15 @@ def clues_list(page: int = 0):
 def get_clue(clue_id: Union[int, str]):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if isinstance(clue_id,int):
-        true_id = int(clue_id)
+    if isinstance(clue_id, str):
+        true_id = bson.objectid.ObjectId(clue_id)
     else:
         true_id = clue_id
     result = db.clues.find_one({"$and": [{"_id": true_id}, {'invalid_count': {"$eq": 0}}]})
     result["id"] = str(result["_id"])
     del result["_id"]
     category = db.categories.find_one({"_id": result["category_id"]})
-    db.categories.find()
+    category['id']= str(category['_id'])
     result["category"] = category
     del result["category_id"]
     return result
@@ -309,8 +311,8 @@ def get_random_clue(valid: bool = True):
 def remove_clue(clue_id: Union[int, str]):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if isinstance(clue_id, int):
-        true_id = int(clue_id)
+    if isinstance(clue_id, str):
+        true_id = bson.objectid.ObjectId(clue_id)
     else:
         true_id = clue_id
     db.clues.update_one({"_id":true_id},{ '$inc': {'invalid_count': 1}})

@@ -70,12 +70,12 @@ def categories_list(page: int = 0):
 def get_category(category_id: Union[int, str]):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if isinstance(category_id,int):
-        true_id = int(category_id)
+    if isinstance(category_id, str):
+        true_id = bson.objectid.ObjectId(category_id)
     else:
         true_id = category_id
-    result = db.categories.aggregates({"_id": true_id})
-    result["id"] = result["_id"]
+    result = db.categories.find_one({"_id": true_id})
+    result["id"] = str(result["_id"])
     del result["_id"]
     return result
 
@@ -128,8 +128,8 @@ def create_category(category: CategoryIn):
 def update_category(category_id: Union[int,str], category: CategoryIn, response: Response):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if isinstance(category_id, int):
-        true_id = int(category_id)
+    if isinstance(category_id, str):
+        true_id = bson.objectid.ObjectId(category_id)
     else:
         true_id = category_id
     db.categories.update_one({"_id":true_id},{ '$set': {'title': category.title},})
@@ -159,8 +159,8 @@ def update_category(category_id: Union[int,str], category: CategoryIn, response:
 def remove_category(category_id: Union[int,str]):
     client = pymongo.MongoClient(mongo_str)
     db = client[dbname]
-    if isinstance(category_id, int):
-        true_id = int(category_id)
+    if isinstance(category_id, str):
+        true_id = bson.objectid.ObjectId(category_id)
     else:
         true_id = category_id
     return_cat = db.categories.find_one({'_id': true_id})
